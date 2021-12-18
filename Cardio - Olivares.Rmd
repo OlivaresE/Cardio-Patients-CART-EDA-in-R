@@ -1,0 +1,619 @@
+---
+title: 
+author: 
+date: 
+output:
+  rmarkdown::pdf_document:
+    fig_caption: yes        
+    includes:  
+      in_header: my_header.tex
+    toc: true
+    toc_depth: 3
+  html_document:
+    toc: no
+    toc_depth: 3
+    df_print: paged
+urlcolor: blue
+fontsize: 12pt
+geometry: a4paper, headheight=0pt, margin=0.4in
+linestretch: 1.35
+links-as-notes: yes
+documentclass: article
+linkcolor: black
+header-includes:
+- \usepackage{placeins}
+- \usepackage{fancyhdr}
+- \usepackage{setspace}
+- \usepackage{chngcntr}
+- \usepackage{microtype}
+- \usepackage{booktabs}
+- \onehalfspacing
+- \counterwithin{figure}{section}
+- \counterwithin{table}{section}
+---
+```{r setup, include=FALSE}
+#knitr::opts_chunk$set(include = FALSE)
+# Lista de paquetes necesarios para correr el script
+paquetes <-	c("readr", "dplyr", "knitr", "factoextra", "psych", "cowplot", "DT",
+              "tibble", "stringr", "fossil", "GGally", "alr4", "ISLR", "fuzzyjoin", "viridis", "lubridate", "kableExtra", "anytime", "tidyverse", "readxl", "corrplot", "PerformanceAnalytics", "naniar", "rpart", "rpart.plot", "caret", "cowplot", "ModelMetrics", "ROCR")
+
+# Verificar que estén todos instalados e instalar los que falten
+instalados <- paquetes %in% rownames(installed.packages())
+if (any(instalados == FALSE)) {
+  install.packages(paquetes[!instalados])
+}
+
+# Cargarlos
+invisible(lapply(paquetes, library, character.only = TRUE))
+
+# Evitar notacion cientifica
+options(scipen=999)
+
+# Theme
+theme_set(theme_bw())
+
+
+```
+
+\newpage
+## Carátula
+```{=tex}
+\begin{centering}
+
+\vspace{3 cm}
+
+\Huge
+
+\bf MAESTRÍA EN CIENCIA DE DATOS
+
+\vspace{3 cm}
+
+\end{centering}
+\Large
+```
+Rosario\
+Cohorte 2021 - 2022\
+Ing. Emiliano Olivares\
+36227254\
+[emiliano.olivares\@unc.edu.ar](mailto:emiliano.olivares@unc.edu.ar){.email}
+
+\vspace{3 cm}
+
+\normalsize
+
+Presentado a fin de cumplimentar con el Final Integrador\
+Materia: Data Mining\
+Fecha: `r today()`\
+Realizado utilizando R Studio Versión: `r paste0(R.Version()[c("major","minor")], collapse = ".")`
+
+\newpage
+
+## Introducción
+```{r Carga_Datos, include=FALSE}
+# Dataset
+ds <- read_xls("cardio.xls")
+ds <- ds %>% 
+  arrange(imc)
+
+```
+### Exploracion sencilla del dataset
+
+Realizamos una exploración aleatoria de los datos, tomando un sampleo de 5 individuos.
+```{r Muestra ds, echo=FALSE, message=FALSE, warning=FALSE, out.width="95%", paged.print=TRUE}
+ds_sampple <- ds %>% slice_sample(n = 5)
+ds_sampple %>%
+  kbl(caption = "Muestra Dataset", booktabs = T) %>%
+  kable_classic(full_width = F, html_font = "Cambria") %>% 
+  kable_styling(latex_options="scale_down") %>% 
+  kable_styling(latex_options = "HOLD_position")
+
+```
+Ademas, se suma la metadata asociada a nuestra base de datos, correspondiente a la definición precisa de variable que comprende nuestro estudio clínico, ademas de un elemento de suma importancia: unidades de medida.
+
+```{r Meta data, echo=FALSE, message=FALSE, warning=FALSE, out.width="95%", paged.print=TRUE}
+ds_descripcion <- tibble("Variable" = colnames(ds)) %>% 
+  mutate("Descripcion" = c("Identificacion anonimizada de usuario", "Sexo del paciente (0: Femenino,  1: Masculino)", "Índice de masa corporal: cociente del peso en kg y la estatura al cuadrado en metros", "Perímetro abdominal (en centímetros)", "Hematocrito (porcentaje del volumen de eritrocitos en el volumen de sangre)", "Glicemia (en mg/dL)", "Colesterol Total (en mg/dL)", "Colesterol HDL (en mg/dL)", "Triglicéridos (en mg/dL)"
+  ))
+
+ds_descripcion %>%
+  kbl(caption = "Metadata: Descripcion de variables", booktabs = T) %>%
+  kable_classic(full_width = F, html_font = "Cambria") %>% 
+  kable_styling(latex_options="scale_down") %>% 
+  kable_styling(latex_options = "HOLD_position")
+```
+## Analisis univariado y bivariado
+
+```{r Medidas, echo=FALSE, message=FALSE, warning=FALSE, out.width="95%", paged.print=TRUE}
+medidas <- function(x){
+  Min <- min(x)
+  Q1 <- quantile(x,0.25)
+  Mediana <- median(x)
+  Q3 <- quantile(x,0.75)
+  Max <- max(x)
+  Promedio <- mean(x)
+  DesvEst <- sd(x)
+  return(
+    round(rbind(Min,Q1,Mediana,Q3,Max,Promedio,DesvEst),2)
+  )
+  }
+# Masculino. Agrego columna de valores de referencia. Convierto todo a char.
+ds_medidas_masc <- ds %>% 
+  filter(sexo == 1) %>% 
+  select(-c(id, sexo)) 
+ds_medidas_masc <- as.data.frame(apply(ds_medidas_masc, MARGIN = 2, medidas))
+ds_medidas_masc <- ds_medidas_masc %>%
+   mutate_if(is.numeric, as.character) %>% 
+  add_row(imc = "20 a 25", perimetro_abdo = "Menor a 102", hto = "38.3 a 48.6", glicemia = "70 a 100", ct = "Menor a 200", hdl = "Menor a 40", tgd = "Menor a 1.7")
+
+# Femenino. Agrego columna de valores de referencia. Convierto todo a char.
+ds_medidas_fem <- ds %>% 
+  filter(sexo == 0) %>% 
+  select(-c(id, sexo))
+ds_medidas_fem <- as.data.frame(apply(ds_medidas_fem, MARGIN = 2, medidas))
+ds_medidas_fem <- ds_medidas_fem %>%
+  mutate_if(is.numeric, as.character) %>% 
+  add_row(imc = "20 a 24", perimetro_abdo = "Menor a 88", hto = "35.5 a 44.9 ", glicemia = "70 a 100", ct = "Menor a 200", hdl = "Menor a 50", tgd = "Menor a 1.7")
+
+rownames(ds_medidas_masc) <- c("Min","Q1","Mediana","Q3","Max","Promedio","DesvEst", "Valores normales")
+ds_medidas_masc %>%
+  kbl(caption = "Medidas de tendencia central y dispersion univariadas para hombres", booktabs = T) %>%
+  kable_classic(full_width = F, html_font = "Cambria") %>% 
+  kable_styling(latex_options="scale_down") %>% 
+  kable_styling(latex_options = "HOLD_position")
+
+rownames(ds_medidas_fem) <- c("Min","Q1","Mediana","Q3","Max","Promedio","DesvEst", "Valores normales")
+ds_medidas_fem %>%
+  kbl(caption = "Medidas de tendencia central y dispersion univariadas para mujeres", booktabs = T) %>%
+  kable_classic(full_width = F, html_font = "Cambria") %>% 
+  kable_styling(latex_options="scale_down") %>% 
+  kable_styling(latex_options = "HOLD_position")
+
+```
+Se obtuvo valor de referencia de Mayo Foundation for Medical Education and Research (MFMER). Se separaron las tablas al haber valor de referencia que poseen diferencias entre sexo. La tabla es util para identificar si la media/promedio de cada variable, diferenciada segun sexo, se aproxima a los valores normales de referencia obtenidos.\
+Ademas, deberemos prestar especial atencion a aquellos valores maximos o minimos, ya que podrian tratarse de outliers que estan empujando nuestro promedio (mas aun, al tratarse de pocos individuos).
+En nuestra tabla, al ser un analisis univariado, no podemos detectar si los valores extremos en cada una de las variables corresponden al mismo individuo. Por ejemplo, para la tabla de mujeres: 296 en ct (límite normal es 200) y 127 cm en perimetro_abdo (límite normal 88), ¿corresponden al mismo individuo? Podemos aplicar un filtro sobre el individuo con valor extremo máximo en perimetro_abdo y ver todas las realizaciones de variables para ese individuo (ver tabla a continuación).\
+Además, se detecta que las variables glicemia, hdl y tgd se encuentran escaladas (se desconece puntualmente el escalamiento utilizado), por lo que no podremos compararlos directamente con el valor de referencia. En caso de conocer el escalamiento podríamos aplicarlo sobre el valor de referencia normal y comparar. Esta información (qué escalamiento se aplicó) no se encuentra en la metadata del problema por lo que el análisis quedará pendiente.
+
+```{r Individuo maximo, echo=FALSE, message=FALSE, warning=FALSE, out.width="95%", paged.print=TRUE}
+ind_max_fem <- ds_medidas_fem %>% 
+  filter(perimetro_abdo == c(127.0))
+
+ind_max_fem %>%
+  kbl(caption = "Individuos con ct elevado, sexo femenino", booktabs = T) %>%
+  kable_classic(full_width = F, html_font = "Cambria") %>% 
+  kable_styling(latex_options="scale_down") %>% 
+  kable_styling(latex_options = "HOLD_position")
+```
+### Distribucion univariada
+```{r Densidad, echo=FALSE, message=FALSE, warning=FALSE, fig.align='center', fig.cap="Densidad univariada y correlacion lineal bivariada"}
+# Correlacion
+ds_vars <-
+  ds %>% 
+  select(-c(id, sexo)) %>% 
+  arrange(imc)
+
+pairs.panels(ds_vars, 
+                         method = "pearson", # correlation method
+                         hist.col = "#00AFBB",
+                         density = TRUE,  # show density plots
+                         ellipses = F, # show correlation ellipses
+                         cex.cor = 1 
+)
+```
+Se descartó el ID y el Sexo como variable ya que no corresponden al análisis de distribución (Sexo es binaria). Además, la primera, nos servirá como identificación anonimizada de individuos y la segunda para implicar el sexo en el análisis de clusterización/aglomeración.\
+Se observan, en general, distribuciones normales con asimetría hacia la izquierda. Es decir, contamos con individuos con valores distintos por encima del promedio. Además, observando el gráfico de tgd, se evidencia la posible aparición de outliers (observemos como la distribución llega hasta el valor escalado 5).\
+Respecto al analisis bivariado, la correlación lineal es en general baja en magnitud, excepto para imc y el perímetro abdominal que resulta de magnitud importante. Es decir, que existe una correlación positiva entre el índice de masa corporal y el perímetro abdominal. Sin implicar causalidad, un perímetro abdominal por encima del promedio se ve en individuos que poseen un imc por encima del promedio, en nuestro set de datos.
+
+### Correlación: otro forma de visualizar
+
+```{r Correlacion 1, echo=FALSE, message=FALSE, warning=FALSE, fig.height=6, out.width="70%", fig.align='center', fig.cap="Matriz de correlacion lineal"}
+correlacion <- cor(ds_vars)
+#?corrplot
+corrplot(correlacion, method = "color", type = "full",  number.cex = .7, addCoef.col = "black")
+
+```
+El gráfico muestra la matriz de correlaciones lineales de manera clara. Se observa rápidamente por la escala de colores que solamente la correlación entre perimetro_abdo y imc es atendible. \
+Para reforzar la visualización anterior, podemos estudiar con que grado de significación podemos aseverar la correlación lineal. Se muestra a continuación.
+
+```{r Correlacion 2, echo=FALSE, fig.align='center', fig.cap="Correlacion", fig.height=4, message=FALSE, warning=FALSE, out.width="70%"}
+chart.Correlation(ds_vars, histogram = F, pch = 19)
+```
+El tamaño de la letra nuevamente simboliza magnitud. Los tres asteriscos rojos representan que podemos aseverar esa correlación lineal con significancia estadística.
+
+### Boxplots y outliers
+
+```{r Boxplots, echo=FALSE, message=FALSE, warning=FALSE, fig.height=7, out.width="70%", fig.align='center', fig.cap="Boxplots segun sexo para cada variable numérica continua"}
+ds_factor <-
+  ds %>% 
+  select(-id) %>% 
+  mutate(sexo = factor(sexo, levels = c(0, 1), labels=c("Femenino","Masculino")))
+
+
+g1 <- ggplot(ds_factor, aes(x = sexo, y = imc)) + geom_boxplot(outlier.colour = "red", outlier.shape = 1) + stat_summary(
+    aes(label = round(stat(y), 1)),
+    geom = "text",
+    size = 2,
+    fun.y = function(y) { o <- boxplot.stats(y)$out; if(length(o) == 0) NA else o },
+    hjust = -1
+  ) + stat_boxplot(geom = 'errorbar')
+g2 <- ggplot(ds_factor, aes(x = sexo, y = perimetro_abdo)) + geom_boxplot(outlier.colour = "red", outlier.shape = 1) + stat_summary(
+    aes(label = round(stat(y), 1)),
+    geom = "text",
+    size = 2,
+    fun.y = function(y) { o <- boxplot.stats(y)$out; if(length(o) == 0) NA else o },
+    hjust = -1
+  ) + stat_boxplot(geom = 'errorbar')
+g3 <- ggplot(ds_factor, aes(x = sexo, y = hto)) + geom_boxplot(outlier.colour = "red", outlier.shape = 1) + stat_summary(
+    aes(label = round(stat(y), 1)),
+    geom = "text",
+    size = 2,
+    fun.y = function(y) { o <- boxplot.stats(y)$out; if(length(o) == 0) NA else o },
+    hjust = -1
+  ) + stat_boxplot(geom = 'errorbar')
+g4 <- ggplot(ds_factor, aes(x = sexo, y = glicemia)) + geom_boxplot(outlier.colour = "red", outlier.shape = 1) + stat_summary(
+    aes(label = round(stat(y), 1)),
+    geom = "text",
+    size = 2,
+    fun.y = function(y) { o <- boxplot.stats(y)$out; if(length(o) == 0) NA else o },
+    hjust = -1
+  ) + stat_boxplot(geom = 'errorbar')
+g5 <- ggplot(ds_factor, aes(x = sexo, y = ct)) + geom_boxplot(outlier.colour = "red", outlier.shape = 1) + stat_summary(
+    aes(label = round(stat(y), 1)),
+    geom = "text",
+    size = 2,
+    fun.y = function(y) { o <- boxplot.stats(y)$out; if(length(o) == 0) NA else o },
+    hjust = -1
+  ) + stat_boxplot(geom = 'errorbar')
+g6 <- ggplot(ds_factor, aes(x = sexo, y = hdl)) + geom_boxplot(outlier.colour = "red", outlier.shape = 1) + stat_summary(
+    aes(label = round(stat(y), 1)),
+    geom = "text",
+    size = 2,
+    fun.y = function(y) { o <- boxplot.stats(y)$out; if(length(o) == 0) NA else o },
+    hjust = -1
+  ) + stat_boxplot(geom = 'errorbar')
+g7 <- ggplot(ds_factor, aes(x = sexo, y = tgd)) + geom_boxplot(outlier.colour = "red", outlier.shape = 1) + stat_summary(
+    aes(label = round(stat(y), 1)),
+    geom = "text",
+    size = 2,
+    fun.y = function(y) { o <- boxplot.stats(y)$out; if(length(o) == 0) NA else o },
+    hjust = -1
+  ) + stat_boxplot(geom = 'errorbar')
+g8 <- ggplot(ds, aes(x = sexo, fill = sexo)) + geom_bar(position = "dodge") +
+  scale_fill_grey(start = .5, end = .9) 
+
+plot_grid(g1, g2, g3, g4, g5, g6, g7, g8, ncol = 3)
+```
+
+Se observa que existen realizaciones muy por arriba del promedio para la mayoría de las variables en el caso de individuos masculinos. Por ejemplo, existen individuos con un imc muy alto y su correspondiente perímetro abdominal elevado. ¿Son los mismos individuos?
+
+```{r Outliers, echo=FALSE, message=FALSE, warning=FALSE, out.width="95%", paged.print=TRUE}
+# Filtro masculinos y valores altos de ct, bajos de tgd
+ind_max_masc <- ds %>% 
+  filter(sexo == 1) %>% 
+  filter(tgd < 3 & ct > 250) %>% 
+  arrange(hdl)
+
+ind_max_masc %>%
+  kbl(caption = "Individuos extremos, masculinos", booktabs = T) %>%
+  kable_classic(full_width = F, html_font = "Cambria") %>% 
+  kable_styling(latex_options="scale_down") %>% 
+  kable_styling(latex_options = "HOLD_position")
+```
+
+Un experto de dominio nos aconsejaría precaución: ya detectamos que no existe fuerte correlación entre la mayoría de nuestras variables. Mientras un observador no experto tendería a pensar que las realizaciones extremas en nuestro boxplots corresponden a los mismos individuos, una simple tabulacion nos detalla como un individuo con un altísimo valor de ct se corresponde con un valor promedio de tgd. El individuo 32 puede tener una alimentación o una condición hormonal que cause esa relación lipídica a priori no esperable. Por ejemplo ciertos deportistas pueden tener valores elevados de ct y a la vez tgd bajos.\
+El analisis multivariado para la identificación de "individuos outliers" no es tan superficial como puede serlo el detectar realizaciones outliers para la distribución univariada (que quedan expresamente marcados en nuestros boxplots).\
+Para el caso de individuos femeninos, la distribución de outliers en tgd resulta interesante. Podria, nuevamente, consultarse con un experto de dominio para estudiar a que puede deberse esta situacion.
+
+## Analisis de Componentes Principales
+
+```{r PCA, echo=FALSE, message=FALSE, warning=FALSE, out.width="95%", paged.print=TRUE}
+# Retiramos id y variable binaria
+# El arrange es importante para mantener el orden, ya que perdemos el ID, con esto, nos aseguramos que los individuos coincidiran con nuestro dataset original y podremos identificarlos.
+ds_pca1 <- ds %>% 
+  select(-c(id, sexo)) %>% 
+  arrange(imc)
+
+# Sobre este operamos, guardamos el anterior de referencia
+ds_pca <- ds %>% 
+  select(-c(id, sexo)) %>% 
+  arrange(imc)
+
+# Calculamos PCA
+ds_pca <- FactoMineR::PCA(X = ds_pca, scale.unit = T, 
+                           ncp = ncol(ds_pca), graph = F)
+
+# Autovalores
+eig_val <- factoextra::get_eigenvalue(ds_pca)
+
+eig_val %>%
+  kbl(caption = "Autovalores", booktabs = T) %>%
+  kable_classic(full_width = F, html_font = "Cambria") %>% 
+  kable_styling(latex_options="scale_down") %>% 
+  kable_styling(latex_options = "HOLD_position")
+```
+```{r Scree plot, echo=FALSE, message=FALSE, warning=FALSE, fig.height=3, out.width="70%", fig.align='center', fig.cap="Scree Plot de PCA"}
+fviz_eig(ds_pca, addlabels = TRUE, ylim = c(0, 40))
+```
+
+En las visualizaciones anteriores (tabla y scree plot) se observa una situación esperable, en función de la correlación lineal bivariada de magnitud baja, las primeras dimensiones resumen una porción reducida de la variabilidad total de los datos.\
+Con las dos primeras dimensiones logramos explicar un `r (30.2 + 19.1)` % de la variabilidad total, porcentaje honestamente bajo.\
+Siguiendo el enunciado, se realizará un análisis más profundo tomando estos dos primeros ejes factoriales.
+
+### Análisis de las dos primeras componentes
+
+```{r AllDim, echo=FALSE, message=FALSE, warning=FALSE, out.width="95%", paged.print=TRUE}
+variabilidad <- get_pca_var(ds_pca)
+
+variabilidad$coord %>%
+  kbl(caption = "Variabilidad", booktabs = T) %>%
+  kable_classic(full_width = F, html_font = "Cambria") %>% 
+  kable_styling(latex_options="scale_down") %>% 
+  kable_styling(latex_options = "HOLD_position")
+
+```
+```{r ContribDim1, echo=FALSE, message=FALSE, warning=FALSE, fig.height=3, out.width="70%", fig.align='center', fig.cap="Fviz - Contribucion de variables a la Dimension 1"}
+fviz_contrib(ds_pca, choice = "var", axes = 1)
+```
+```{r ContribDim2, echo=FALSE, message=FALSE, warning=FALSE, fig.height=3, out.width="70%", fig.align='center', fig.cap="Fviz - Contribucion de variables a la Dimension 2"}
+fviz_contrib(ds_pca, choice = "var", axes = 2)
+```
+
+Observamos otro ordenamiento lógico en nuestros ejes factoriales. La primera dimensión muestra que la contribución de las variables más fuertemente correlaciones -perímetro abdominal e indice de masa corporal- son las que superan el umbral de aporte significativo (línea de puntos roja, que se corresponde con el valor esperado si las contribuciones fueran perfectamente uniformes). \
+Por su parte, la segunda dimensión se explica principalmente por el aporte de tgd y ct, que poseen una correlación baja pero de mayor magnitud que el resto de las correlaciones lineales bivariadas (aparte, obviamente, de perimetro_abdo-imc). Esto es relativamente lógico en tanto el colesterol total se computa como la suma de los componentes clínicos de colesterol (entre ellos tgd).\
+En un análisis gráfico que muestre las dos primeras dimensiones obtendremos alineados al eje D1 hacia los valores positivos aquellos individuos con un alto valor de imc y perímetro abdominal. Respecto al eje D2 hacia los valores positivos del eje observaremos los individuos con altos valores de ct y tgd.
+
+### Calidad de representación de las variables 
+
+```{r ContribDimc, echo=FALSE, message=FALSE, warning=FALSE,  fig.height=4.5, out.width="70%", fig.align='center', fig.cap="Calidad de representacion de las variables, cos2"}
+corrplot(variabilidad$cos2, is.corr=FALSE,
+         title = "Calidad de representación de las variables")
+```
+
+Sabemos que un valor cercano a 1, significa un alto porcentaje de explicación de esa variable en esa dimensión. Observamos que esto se cumple para imc y perimetro_abdo en la primera dimensión y tgd principalmente en la segunda.\
+Hay una alta dispersión de la explicación de la varianza de los datos en el resto de las dimensiones. Esto se debe también a que nuestro dataset cuenta con una estructura de correlación baja.
+
+### Círculos de correlación
+
+```{r Circulocorrelacion, echo=FALSE, message=FALSE, warning=FALSE,  fig.height=3, out.width="70%", fig.align='center', fig.cap="Circulos de correlacion: Dimension 1 y 2"}
+fviz_pca_var(ds_pca, col.var = "cos2",
+                         gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"), 
+                         repel = TRUE # Avoid text overlapping
+)
+```
+
+Se observa en el círculo de correlación los elementos mencionados anteriormente y esperados: las flechas que representan a perímetro_abdo e imc se ubican hacia los valores positivos de la dimensión 2, por su parte tgd y ct se ubican hacia los valores positivos de la dimensión 2. La cercanía con los ejes mencionados también era esperable, una cercanía al eje respresenta un valor de cos2 igual a uno y un fuerte componente de explicación de la varianza en esa dimensión.
+
+### Segregación por sexo
+
+```{r indpca, echo=FALSE, message=FALSE, warning=FALSE,  fig.height=3, out.width="70%", fig.align='center', fig.cap="Individuos y su ubicacion en los dos primeros ejes factoriales"}
+
+# Representación de los individuos en el primer plano factorial según su contribición
+fviz_pca_ind(ds_pca, col.ind = "cos2", 
+                         gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+                         repel = TRUE # Avoid text overlapping (slow if many points)
+)
+```
+En principio, se aprecia una leve tendencia de la dimensión uno a separar los individuos según sexo. Pero podría deberse a una casualidad en función de la cantidad relativamente baja de la población y que, proporcionalmente, tengamos una mayor cantidad de individuos masculos con alto imc. Es decir, nuestro PCA parece guiarse más por ello que por sexo.\
+Se acompañan dos tablas, una que identifica los individuos hacia los valores positivos de la dimensión uno y otra hacia los valores negativos. Además, se tomó aquellos cuyo cos2 según la codificación en colores es mayor a 0.6.\
+
+```{r Ind Derecha e Izq, echo=FALSE, message=FALSE, warning=FALSE, paged.print=TRUE}
+# Individuos hacia la derecha
+der <- ds %>% 
+  mutate(sexo = factor(sexo, levels = c(0, 1), labels=c("Femenino","Masculino"))) %>% 
+  filter(id %in% c(51, 62, 40, 32, 34, 66, 68, 38)) %>% 
+  select(-id) 
+izq <- ds %>% 
+  mutate(sexo = factor(sexo, levels = c(0, 1), labels=c("Femenino","Masculino"))) %>% 
+  filter(id %in% c(48, 11, 13, 35, 21, 23, 3, 17)) %>% 
+  select(-id)
+
+der %>%
+  kbl(caption = "Individuos sobre valores positivo de la dim 1, con cos2 mayor a 0.6", booktabs = T) %>%
+  kable_classic(full_width = F, html_font = "Cambria") %>% 
+  kable_styling(latex_options="scale_down") %>% 
+  kable_styling(latex_options = "HOLD_position")
+
+izq %>%
+  kbl(caption = "Individuos sobre valores negativo de la dim 1, con cos2 mayor a 0.6", booktabs = T) %>%
+  kable_classic(full_width = F, html_font = "Cambria") %>% 
+  kable_styling(latex_options="scale_down") %>% 
+  kable_styling(latex_options = "HOLD_position")
+```
+
+## Aglomeracion
+
+Los métodos de clusterización enfrentan el problema de la colinealidad (alta magnitud de correlación lineal entre dos variables): cada variable tiene asignado un peso para influir en la clusterización de cada individuo, pero si dos variables están muy correlacionadas implican, en nuestro análisis, lo mismo. Ese decir, ese peso se "duplica" y "tira" el método hacia lo que indiquen esas variables. Bajo múltiples colinealidades, se presenta el problema de que las variables más correlacionadas ocultan la información de las que no lo están.\
+En función de la argumentación anterior se ha dropear la variable perimetro_abdo y mantener la variable imc que contiene mayor información intrínseca y es un número con mayor expansión de uso clínico. Además, se usará k-means con un cálculo de distancia euclidiana, solucionado el problema de correlación.\
+Se llevará adelante un proceso de normalización, para evitar problemas de escala y one hot encoding sobre variable sexo.\
+Se aclara, además, que se probó -no se muestra en este trabajo ya que no se consideró que aporte demasiado- una implementación con one-hot-encoding sobre la variable sexo, pero ese método consiguió unificar a todos los hombres en un mismo cluster. Esto puede deberse a que las distancias respecto a la dimension sexo utilizada como variable dummy puede superar el resto de los aportes (provenientes de otras dimensiones), dejándonos con sexo como variable dominante a la hora de la clusterizacion. Tambien, nuevamente, puede estar impactando el numero bajo de individuos. Otro argumento fue el siguiente: ¿por qué incluir una variable que nos genera una clusterización tal que incluye un grupo para solamente diferenciar por sexo cuando esa diferenciación podemos verla en los datos originales de maenra sencilla y, a priori, no parece realizar un aporte sustancial?\
+Por esto, se decidió dejar de lado la variable sexo para la implementación del método kmeans.
+```{r Estandarizacion, message=FALSE, warning=FALSE, include=FALSE}
+# Estandarizar las variables
+ds_kmeans <- ds %>% 
+   select(-c(id, sexo, perimetro_abdo))
+
+ds_std <- scale(ds_kmeans)
+
+```
+
+### Silhoutte y SCE
+Implementamos silhoutte y SCE para identificar el numero de clusters recomendados.
+
+```{r silhoutte, echo=FALSE, fig.align='center', fig.cap="Indice de Silhouette segun cantidad de clusters", fig.height=3, message=FALSE, warning=FALSE, out.width="70%"}
+# Indice Silhouette  ---
+fviz_nbclust(ds_std, kmeans, method = "silhouette") +
+  labs(title    = "Indice Silhouette según la cantidad de clusters")
+```
+```{r SCE, echo=FALSE, fig.align='center', fig.cap="SCE segun cantidad de clusters", fig.height=3, message=FALSE, warning=FALSE, out.width="70%"}
+# Suma de cuadrado error (o within)---
+wss <- (nrow(ds_std) - 1) * sum(apply(ds_std, 2, var))
+for (i in 1:9) {
+  wss[i] <- sum(kmeans(ds_std, centers = i)$withinss)
+}
+plot(1:9, wss, type = "b", xlab = "Number of Clusters",
+     ylab = "Suma de cuadrados dentro de los clusters", 
+     main = "SCE según la cantidad de clusters")
+```
+Puede tomarse 4 clusters como un numero adecuado para el análisis.
+
+```{r kmeans, message=FALSE, warning=FALSE, include=FALSE}
+# Kmeans
+clustering <- kmeans(ds_std, centers = 4)
+
+# Anexamos al ds inicial el cluster correspondiente
+ds_kmeans$cluster <- clustering$cluster
+```
+
+### Boxplots para visualizar clusters
+
+```{r Cluster-box, echo=FALSE, fig.align='center', fig.cap="Composicion de clusters segun variables", fig.height=3, message=FALSE, warning=FALSE, out.width="70%"}
+generarBoxPlotsPorGrupos <- function(df, var_interes, grupos = "cluster" ){
+  
+  # Convertir a cuadro de datos
+  df <- data.frame(df)
+  
+  # Definir etiquetas que con la cantidad de observaciones por grupos
+  etiquetas = paste(
+    levels(factor(df[, grupos])), "\n(N = ", table(df[, grupos]), ")", sep = ""
+  )
+  
+  # Generar gráfico
+  boxplot <- ggplot(
+    df, 
+    aes( x = factor( get(grupos) ), y = get(var_interes), 
+         fill = factor(  get(grupos) )) ) + 
+    geom_boxplot() +
+    theme(legend.position = "none") +
+    scale_x_discrete( name = paste0(grupos), labels = etiquetas ) +
+    scale_y_continuous( name = paste0(var_interes) )  + 
+    geom_hline(yintercept = median(df[, var_interes])) +
+    theme(axis.text.x  = element_text( size = rel(0.75))) + 
+    theme(axis.text.x = element_text(angle = 30, hjust = 1)) 
+  
+  return(boxplot)
+}
+
+g1 <- generarBoxPlotsPorGrupos(df = ds_kmeans, var_interes = "imc" )
+g2 <- generarBoxPlotsPorGrupos(df = ds_kmeans, var_interes = "hto" )
+g3 <- generarBoxPlotsPorGrupos(df = ds_kmeans, var_interes = "glicemia")
+g4 <- generarBoxPlotsPorGrupos(df = ds_kmeans, var_interes = "ct")
+g5 <- generarBoxPlotsPorGrupos(df = ds_kmeans, var_interes = "hdl")
+g6 <- generarBoxPlotsPorGrupos(df = ds_kmeans, var_interes = "tgd")
+
+plot_grid( g1, g2, g3, g4, g5, g6, ncol = 3 )
+```
+#### Cluster numero uno
+
+Identifica pacientes con un valores promedios en la gran mayoría de variables pero con un componente de hto elevado.
+
+#### Cluster numero dos
+
+Presenta pacientes con valores elevados de colesterol total y de hdl (componente de ct). Llamativamente estos mismos individuos poseen un icm relativamente promedio.
+
+#### Cluster numero tres
+
+Identifica pacientes con un valores promedios en la gran mayoría de variables y valores de colesterol promedio tendiendo a bajo. Ademas de un icm con mayor spread. Identifica a los pacientes con glicemia elevada (¿diabéticos?). 
+
+#### Cluster numero cuatro
+
+Cluster que aglomera a los individuos "promedio" o al menos cuyos boxplots se aproximan al promedio en todas las variables de estudio.
+
+#### Conclusiones
+
+El método, sin incluir la variable sexo mediante mecanismos de encodeado, no separa a los pacientes por sexo, lo que puede resultar valioso si estamos tratando de identificar población patológica y normal -en sentido clínico de normalidad-. Pero, también, los valores de referencia no son los mismos para estos grupos. Deberemos incluir un experto de dominio para tomar una decisión final sobre este punto.\
+El método implementado logra identificar pacientes con valores por encima del promedio en algunas variables y aglomerarlos -tal es el caso del cluster número uno y número tres, por ejemplo-. Se observa ademas un cierto spread de los pacientes con valores promedio entre los clusters. Podría pulirse el método para tratar de separar con algún criterio a pacientes con valores más cercanos al promedio pero alguna diferenciación particular.
+
+```{r cluster-sex, echo=FALSE, fig.align='center', fig.cap="Distribucion de sexo en clusters", fig.height=3, message=FALSE, warning=FALSE, out.width="70%"}
+ds_kmeans %>% 
+    add_column(sexo = ds$sexo) %>%
+    mutate(sexo = factor(sexo, levels = c(0, 1), labels=c("Femenino","Masculino"))) %>% 
+  ggplot() + 
+  aes(x=factor(cluster), fill=factor(sexo)) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = "Cluster", y ="Observaciones", 
+       fill = "Sexo",
+       title = "Sexo según Cluster") +
+  geom_bar(position = "fill")
+ 
+```
+La distribucion por sexo presenta un spread significativo. Situacion a analizar en profundidad con un experto de dominio segun lo que se busque estudiar. 
+
+## Obesidad: variable dicotomica
+
+Generaremos un modelo predictivo a partir de la construccion de una variable "obesidad" a ser utilizada como respuesta. Utilizaremos para tal fin las siguientes variables predictoras: hto, glicemia, ct, hdl y tgd./
+
+```{r var_obesidad, echo=FALSE, fig.align='center', fig.cap="Distribucion de obesidad en nuestro dataset", fig.height=6.2, message=FALSE, warning=FALSE, out.width="70%"}
+# Construimos la variable obesidad usando imc > 30
+ds_obesidad <- ds %>% 
+  mutate(obesidad = ifelse(imc > 30, 0, 1)) %>% 
+  select(-c(id, perimetro_abdo, imc)) %>% 
+  mutate(obesidad = factor(obesidad, levels = c(0, 1), labels = c("Obesidad", "Normopeso")))
+
+ds_obesidad %>% 
+  ggplot() + 
+  aes(x=factor(obesidad)) +
+  labs(y ="Cantidad de individuos", 
+       x ="",
+       title = "Normopeso vs obesidad") +
+  geom_bar() +
+  geom_text(stat='count', aes(label=..count..), vjust=-1)
+
+```
+### Modelo: entrenamiento y validación
+Se emplea el split tradicional, 80% en train y 20% en test. Usamos validación cruzada, con 10  sub-grupos o particiones y 3 repeticiones iterativas, para seleccionar el árbol que mejor ajusta a partir de la partición creada.
+
+```{r modelo_train, message=FALSE, warning=FALSE, include=FALSE}
+set.seed(12345)
+
+# Particiono los datos en Train y Test
+partition <- createDataPartition(y = ds_obesidad$obesidad, p = 0.8, list = FALSE)
+ds.train <- ds_obesidad[partition, ]
+ds.test <- ds_obesidad[-partition, ]
+
+# Defino validación cruzada k-fold (10) x3
+caret.control <- trainControl(
+  method = "repeatedcv",
+  number = 10,
+  repeats = 3
+)
+
+```
+
+La librería caret toma como insumo los datasets particionados en test y train y selecciona el modelo optimo, balanceando CP y accuracy/kappa. Como se muestra a continuación, nos indica literalmente cual es el modelo elegido indicando según su CP.
+```{r modelo_test, echo=FALSE, message=FALSE, warning=FALSE, out.width="95%"}
+
+arbol_1 <- train(
+  y = ds.train %>% pull("obesidad"),
+  x = ds.train %>% select("sexo", "hto", "glicemia", "ct", "hdl", "tgd"),
+  method = "rpart",
+  trControl = caret.control,
+  tuneLength = 15
+)
+
+# Resultados
+arbol_1
+
+```
+### Modelo: predicción y conclusiones
+Se observa el arbol del mejor modelo seleccionado siguiendo el trabajo anterior.
+```{r grafico_arbol, echo=FALSE, fig.align='center', fig.cap="Mejor arbol", fig.height=6.2, message=FALSE, warning=FALSE, out.width="70%"}
+
+ prp(arbol_1$finalModel,
+   extra = 101, type = 2, xsep = "/", box.palette = "auto",
+   round = 0, leaf.round = 2, shadow.col = "gray", yes.text = "Si", no.text = "No"
+    )
+```
+
+El modelo tiene una capacidad predictiva con accuracy igual a uno - como se muestra en la salida de la predicción a continuación-. Es decir, genera un criterio de clasificación casi idéntico al empleado para construir la variable (con diferencia del signo igual en la definición de obesidad en "imc > 30"). Esto puede deberse a que según el criterio establecido, y empleado clinicamente, la obesidad tiene en cuenta únicamente una variable en su construcción, dejando el resto de las variables predictoras como secundarias.\
+```{r arbol_03, echo=FALSE, out.width="95%"}
+
+# Matriz de confusión 
+pred <-  predict(arbol_1$finalModel, newdata = ds.test, type="class")
+caret::confusionMatrix(pred, ds.test$obesidad)
+
+```
+
+
+
+
+
